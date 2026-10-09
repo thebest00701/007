@@ -44,7 +44,11 @@ with st.sidebar:
     st.divider()
     st.markdown('<div class="small-label">SYSTEM STATUS</div>', unsafe_allow_html=True)
     st.success("Interface online")
-    if os.getenv("OPENAI_API_KEY") or (hasattr(st, "secrets") and st.secrets.get("OPENAI_API_KEY", "")):
+    try:
+        api_key_configured = bool(os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", ""))
+    except Exception:
+        api_key_configured = bool(os.getenv("OPENAI_API_KEY"))
+    if api_key_configured:
         st.success("AI key detected")
     else:
         st.warning("AI key not configured")
