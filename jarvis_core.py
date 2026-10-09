@@ -1,4 +1,4 @@
-import json, os, sqlite3, time, uuid
+import json, os, sqlite3, uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
@@ -13,7 +13,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 DB_PATH = BASE_DIR / "jarvis_history.sqlite3"
 TEXT_MODEL = os.getenv("JARVIS_TEXT_MODEL", "gemini-3.8-flash")
 IMAGE_MODEL = os.getenv("JARVIS_IMAGE_MODEL", "imagen-4.0-generate-001")
-VIDEO_MODEL = os.getenv("JARVIS_VIDEO_MODEL", "veo-3.1-generate-preview")
 
 
 def get_api_key() -> Optional[str]:
@@ -60,12 +59,6 @@ def analyze_product(mode, platform, style, prompt, slides_count, aspect, image=N
 Выведи: краткий анализ видимого товара, 3 идеи рекламного кадра, один подробный image-generation prompt на английском,
 предлагаемые ракурсы/свет/материалы, и короткий рекламный текст. Не придумывай характеристики.
 """
-    elif mode.startswith("VIDEO"):
-        task = f"""
-Подготовь сценарий рекламного ролика с использованием товара для {platform}, стиль {style}, формат {aspect}.
-Выведи: идею, длительность 5–8 секунд, таймлайн по секундам, движение камеры, свет, фон, переход/финальный кадр,
-звуковую атмосферу и отдельный подробный prompt на английском для video generation.
-"""
     else:
         task = f"""
 Проанализируй товар для маркетинга на площадке {platform}. Стиль: {style}.
@@ -99,7 +92,6 @@ def analyze_product(mode, platform, style, prompt, slides_count, aspect, image=N
 
 def chat_with_jarvis(history: List[Dict[str, str]]) -> str:
     client = get_client()
-    # Собираем историю диалога в стандартный формат для generate_content, избегая агентских методов
     contents = []
     for msg in history:
         role = "Пользователь" if msg["role"] == "user" else "JARVIS"
@@ -143,55 +135,6 @@ def generate_visual(prompt: str, aspect: str = "3:4 · карточка това
         raise RuntimeError("Изображение получено в неожиданном формате SDK.")
     path = OUTPUT_DIR / f"jarvis_visual_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.png"
     path.write_bytes(image_bytes)
-    return path
-
-
-def generate_video(prompt: str, image: Optional[Image.Image] = None) -> Path:
-    client = get_client()
-    if image is not None:
-        tmp = OUTPUT_DIR / f"source_{uuid.uuid4().hex[:8]}.png"
-        image.save(tmp, format="PNG")
-        try:
-            source_image = types.Image.from_file(location=str(tmp))
-            operation = client.models.generate_videos(
-                model=VIDEO_MODEL,
-                source=types.GenerateVideosSource(prompt=prompt, image=source_image),
-                config=types.GenerateVideosConfig(number_of_videos=1, duration_seconds=8, resolution="720p")
-            )
-        finally:
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
-    else:
-        operation = client.models.generate_videos(
-            model=VIDEO_MODEL,
-            source=types.GenerateVideosSource(prompt=prompt),
-            config=types.GenerateVideosConfig(number_of_videos=1, duration_seconds=8, resolution="720p")
-        )
-    deadline = time.time() + 900
-    while not operation.done:
-        if time.time() > deadline:
-            raise TimeoutError("Генерация видео не завершилась за 15 минут.")
-        time.sleep(10)
-        operation = client.operations.get(operation)
-    response = operation.response
-    generated = getattr(response, "generated_videos", None) or []
-    if not generated:
-        raise RuntimeError("Veo не вернул видео. Проверь доступ к модели, регион, квоты и биллинг.")
-    video_obj = generated[0].video
-    video_bytes = getattr(video_obj, "video_bytes", None)
-    if not video_bytes:
-        try:
-            client.files.download(file=video_obj, download_path=str(OUTPUT_DIR / "jarvis_video_temp.mp4"))
-            temp_path = OUTPUT_DIR / "jarvis_video_temp.mp4"
-            final_path = OUTPUT_DIR / f"jarvis_video_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.mp4"
-            temp_path.rename(final_path)
-            return final_path
-        except Exception as exc:
-            raise RuntimeError(f"Видео сгенерировано, но SDK не смог скачать файл: {exc}")
-    path = OUTPUT_DIR / f"jarvis_video_{datetime.now():%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:6]}.mp4"
-    path.write_bytes(video_bytes)
     return path
 
 
