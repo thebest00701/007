@@ -99,22 +99,25 @@ def analyze_product(mode, platform, style, prompt, slides_count, aspect, image=N
 
 def chat_with_jarvis(history: List[Dict[str, str]]) -> str:
     client = get_client()
-    formatted_history = []
-    for msg in history[:-1]:
-        role = "user" if msg["role"] == "user" else "model"
-        formatted_history.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
+    # Собираем историю диалога в стандартный формат для generate_content, избегая агентских методов
+    contents = []
+    for msg in history:
+        role = "Пользователь" if msg["role"] == "user" else "JARVIS"
+        contents.append(f"{role}: {msg['content']}")
     
-    chat = client.chats.create(
-        model=TEXT_MODEL,
-        history=formatted_history,
-        config=types.GenerateContentConfig(
-            system_instruction="Ты JARVIS MAX — профессиональный AI-ассистент по маркетингу и дизайну.",
-            temperature=0.7
+    prompt_text = "\n".join(contents) + "\nJARVIS:"
+    try:
+        response = client.models.generate_content(
+            model=TEXT_MODEL,
+            contents=[prompt_text],
+            config=types.GenerateContentConfig(
+                system_instruction="Ты JARVIS MAX — профессиональный AI-ассистент по маркетингу и дизайну. Отвечай вежливо, четко и по делу.",
+                temperature=0.7
+            )
         )
-    )
-    last_message = history[-1]["content"]
-    response = chat.send_message(last_message)
-    return getattr(response, "text", "Нет ответа от модели.")
+        return getattr(response, "text", "Нет ответа от модели.")
+    except Exception as e:
+        raise RuntimeError(f"Ошибка чата Gemini: {e}")
 
 
 def generate_visual(prompt: str, aspect: str = "3:4 · карточка товара") -> Path:
@@ -146,7 +149,6 @@ def generate_visual(prompt: str, aspect: str = "3:4 · карточка това
 def generate_video(prompt: str, image: Optional[Image.Image] = None) -> Path:
     client = get_client()
     if image is not None:
-        import tempfile
         tmp = OUTPUT_DIR / f"source_{uuid.uuid4().hex[:8]}.png"
         image.save(tmp, format="PNG")
         try:
