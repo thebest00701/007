@@ -109,4 +109,140 @@ if page == "Студия":
                 if Path(video_path).exists():
                     st.video(video_path)
             if result.get("files"):
-                for f
+                for f in result["files"]:
+                    if Path(f).exists():
+                        st.download_button(
+                            f"⬇️ Скачать {Path(f).name}",
+                            data=Path(f).read_bytes(),
+                            file_name=Path(f).name,
+                            mime="application/octet-stream",
+                            key=f"download_{Path(f).name}"
+                        )
+            if result.get("project_id"):
+                st.caption(f"Проект сохранён в истории · ID {result['project_id']}")
+        else:
+            st.markdown("#### Готов к работе")
+            st.markdown("""
+            - **DESIGN** — маркетинговая структура слайдов и генерация визуальных концептов.
+            - **PRODUCT** — рекламная концепция и студийный визуал товара.
+            - **AI** — описание, преимущества, аудитория и идеи продвижения.
+            - **VIDEO** — сценарий и подключаемая генерация ролика через Veo.
+            """)
+            st.markdown('<p class="smallmuted">JARVIS не должен придумывать технические характеристики. Проверяй рекламные утверждения перед публикацией.</p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if generate_button:
+        if not get_api_key():
+            st.error("API-ключ не найден. Открой «Настройки и запуск» или добавь GEMINI_API_KEY в .streamlit/secrets.toml.")
+        elif mode.startswith("VIDEO") and product_image is None:
+            st.error("Для режима VIDEO загрузи исходное изображение товара.")
+        else:
+            try:
+                with st.status("JARVIS выполняет задачу…", expanded=True) as status:
+                    st.write("Подготавливаю контекст и анализирую запрос.")
+                    result_text = analyze_product(
+                        mode=mode, platform=platform, style=style, prompt=prompt,
+                        slides_count=slides_count, aspect=aspect, image=product_image
+                    )
+                    st.write("Текстовая концепция готова.")
+                    image_paths, video_paths, output_files = [], [], []
+                    if mode.startswith("VIDEO"):
+                        st.write("Отправляю запрос на генерацию видео. Операция может занять несколько минут.")
+                        video_path = generate_video(prompt=(prompt or "Premium product commercial") + "\n" + result_text[:1200], image=product_image)
+                        video_paths.append(str(video_path))
+                        output_files.append(str(video_path))
+                    elif mode.startswith(("DESIGN", "PRODUCT")) and make_visual:
+                        st.write("Создаю один визуальный концепт через модель генерации изображений.")
+                        visual_path = generate_visual(
+                            prompt=f"{style} advertising visual for {platform}. {prompt}\n"
+                                   f"Product context: {result_text[:1200]}\n"
+                                   f"Aspect ratio: {aspect}. Make a clean commercial visual; avoid gibberish text and do not invent logos.",
+                            aspect=aspect
+                        )
+                        image_paths.append(str(visual_path))
+                        output_files.append(str(visual_path))
+                    project_id = save_project(
+                        name=project_name, mode=mode, platform=platform, style=style,
+                        prompt=prompt, result_text=result_text,
+                        source_name=uploaded.name if uploaded else None,
+                        output_paths=output_files
+                    )
+                    st.session_state.last_result = {
+                        "title": project_name, "text": result_text,
+                        "images": image_paths, "videos": video_paths,
+                        "files": output_files, "project_id": project_id
+                    }
+                    status.update(label="Готово — проект сохранён", state="complete", expanded=False)
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Не удалось завершить задачу: {exc}")
+                st.info("Проверь API-ключ, доступность выбранной модели, интернет-соединение, квоты и биллинг проекта Google AI.")
+
+elif page == "AI Чат":
+    st.markdown("### AI Чат с JARVIS")
+    st.caption("Обсуждай детали проектов, задавай вопросы по маркетингу и дизайну с сохранением контекста беседы.")
+    
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if user_query := st.chat_input("Напиши сообщение JARVIS..."):
+        if not get_api_key():
+            st.error("API-ключ не настроен.")
+        else:
+            st.session_state.chat_history.append({"role": "user", "content": user_query})
+            with st.chat_message("user"):
+                st.markdown(user_query)
+            
+            with st.chat_message("assistant"):
+                with st.spinner("JARVIS думает..."):
+                    try:
+                        reply = chat_with_jarvis(st.session_state.chat_history)
+                        st.markdown(reply)
+                        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                    except Exception as exc:
+                        st.error(f"Ошибка чата: {exc}")
+
+elif page == "История проектов":
+    st.markdown("### История проектов")
+    projects = list_projects()
+    if not projects:
+        st.info("Пока нет сохранённых проектов. Создай первый в разделе «Студия».")
+    else:
+        for p in projects:
+            with st.expander(f"#{p['id']} · {p['name']} · {p['created_at']}"):
+                st.write(f"**Режим:** {p['mode']}  ·  **Площадка:** {p['platform']}  ·  **Стиль:** {p['style']}")
+                st.write(f"**Запрос:** {p['prompt'] or '—'}")
+                st.markdown(p["result_text"])
+                outputs = json.loads(p["output_paths"] or "[]")
+                for path in outputs:
+                    if Path(path).exists():
+                        if path.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                            st.image(path, use_container_width=True)
+                        elif path.lower().endswith(".mp4"):
+                            st.video(path)
+                        st.download_button("Скачать файл", data=Path(path).read_bytes(), file_name=Path(path).name, key=f"hist_{p['id']}_{Path(path).name}")
+                if st.button("Открыть этот проект в студии", key=f"open_{p['id']}"):
+                    st.session_state.last_result = {
+                        "title": p["name"], "text": p["result_text"], "images": [],
+                        "videos": [], "files": outputs, "project_id": p["id"]
+                    }
+                    st.success("Проект загружен в рабочую область. Перейди в «Студия».")
+
+else:
+    st.markdown("### Настройка и запуск")
+    st.markdown("""
+    **Локально на Mac**
+    1. Установи Python 3.11 или 3.12[cite: 4].
+    2. В папке проекта выполни `python3 -m venv .venv`[cite: 4].
+    3. Активируй окружение: `source .venv/bin/activate`[cite: 4].
+    4. Установи зависимости: `pip install -r requirements.txt`[cite: 4].
+    5. Создай `.streamlit/secrets.toml` на основе примеров и вставь свой ключ[cite: 4].
+    6. Запусти: `streamlit run app.py`[cite: 4].
+
+    **Публикация в интернете**
+    - Загрузи проект в GitHub-репозиторий (без секретных файлов)[cite: 4].
+    - На Streamlit Community Cloud выбери репозиторий и `app.py`[cite: 4].
+    - В настройках Secrets добавь свой `GEMINI_API_KEY`[cite: 4].
+    """)
+    st.code("python3 -m venv .venv\nsource .venv/bin/activate\npip install -r requirements.txt\nstreamlit run app.py", language="bash")
