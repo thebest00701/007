@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "outputs"
 OUTPUT_DIR.mkdir(exist_ok=True)
 DB_PATH = BASE_DIR / "jarvis_history.sqlite3"
-TEXT_MODEL = os.getenv("JARVIS_TEXT_MODEL", "gemini-3.8-flash")
+TEXT_MODEL = os.getenv("JARVIS_TEXT_MODEL", "gemini-2.0-flash")
 IMAGE_MODEL = os.getenv("JARVIS_IMAGE_MODEL", "imagen-4.0-generate-001")
 VIDEO_MODEL = os.getenv("JARVIS_VIDEO_MODEL", "veo-3.1-generate-preview")
 
